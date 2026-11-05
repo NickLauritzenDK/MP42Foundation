@@ -7,8 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-        D42000000000000000000001 /* libpng16.a Debug */ = {isa = PBXBuildFile; fileRef = A9B0F2B322A2A36D0012E099; };
-        D42000000000000000000002 /* libpng16.a Release */ = {isa = PBXBuildFile; fileRef = A9B0F2B322A2A36D0012E099; };
         D42000000000000000000003 /* libjpeg.a Debug */ = {isa = PBXBuildFile; fileRef = D42000000000000000000005; };
         D42000000000000000000004 /* libjpeg.a Release */ = {isa = PBXBuildFile; fileRef = D42000000000000000000005; };
 		6661A2EE20890B4400B1A669 /* MP42Foundation.h in Headers */ = {isa = PBXBuildFile; fileRef = 6661A2ED20890B4400B1A669 /* MP42Foundation.h */; settings = {ATTRIBUTES = (Public, ); }; };
@@ -493,7 +491,6 @@
 				A951C184233F4B8F00D63AF8 /* libtiff.a in Frameworks */,
 				A90800FF1D4B82FB002B6950 /* liblept.a in Frameworks */,
 				A90801001D4B82FB002B6950 /* libtesseract.a in Frameworks */,
-                D42000000000000000000001 /* libpng16.a Debug */,
                 D42000000000000000000003 /* libjpeg.a Debug */,
 				A910B6331839511A0064028F /* AudioToolbox.framework in Frameworks */,
 				A910B6321839510B0064028F /* Quartz.framework in Frameworks */,
@@ -529,7 +526,6 @@
 				A966CF04275F6FB500AF8813 /* libtiff.a in Frameworks */,
 				A966CF03275F6E6900AF8813 /* liblept.a in Frameworks */,
 				A99DB6AB1D4648B700C6E56C /* libtesseract.a in Frameworks */,
-                D42000000000000000000002 /* libpng16.a Release */,
                 D42000000000000000000004 /* libjpeg.a Release */,
 				A95BCF982C2AEFAF00DF5B14 /* libmp4v2.a in Frameworks */,
 			);
@@ -1185,6 +1181,7 @@
 		A910B5BD18394E900064028F /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = arm64;
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -1215,6 +1212,7 @@
 		A910B5BE18394E900064028F /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = arm64;
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -1244,6 +1242,7 @@
 		A9B9C213182391DF00416A4E /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = arm64;
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_LOCALIZABILITY_EMPTY_CONTEXT = YES;
@@ -1331,7 +1330,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				ONLY_ACTIVE_ARCH = YES;
 				OTHER_CFLAGS = "";
-				OTHER_LDFLAGS = "-w";
+				OTHER_LDFLAGS = ("$(inherited)", "-w", "\"$(MP42_OCR_ROOT)/lib/libpng16.a\"");
 				SWIFT_INCLUDE_PATHS = "\"$(MP42_MP4V2_ROOT)/include\"";
 				SWIFT_OBJC_INTERFACE_HEADER_NAME = "MP42-Swift.h";
 				SWIFT_PRECOMPILE_BRIDGING_HEADER = NO;
@@ -1343,6 +1342,7 @@
 		A9B9C214182391DF00416A4E /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = arm64;
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_LOCALIZABILITY_EMPTY_CONTEXT = YES;
@@ -1429,7 +1429,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				OTHER_CFLAGS = "";
-				OTHER_LDFLAGS = "-w";
+				OTHER_LDFLAGS = ("$(inherited)", "-w", "\"$(MP42_OCR_ROOT)/lib/libpng16.a\"");
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_INCLUDE_PATHS = "\"$(MP42_MP4V2_ROOT)/include\"";
 				SWIFT_OBJC_INTERFACE_HEADER_NAME = "MP42-Swift.h";
@@ -1442,6 +1442,7 @@
 		A9B9C216182391DF00416A4E /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = arm64;
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -1477,6 +1478,7 @@
 		A9B9C217182391DF00416A4E /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = arm64;
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				COMBINE_HIDPI_IMAGES = YES;

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build pinned static dependencies for both macOS architectures.
+"""Build pinned static dependencies for Apple Silicon macOS.
 Sources/checksums are in Dependencies/sources.json. No prebuilt archive is committed.
 """
 import argparse, hashlib, json, os, shutil, subprocess, sys, tarfile, tempfile
@@ -64,12 +64,20 @@ def source(name):
     return prepared[name]
 # Include recipe, exact sources and toolchain in the completion fingerprint.
 fingerprint=hashlib.sha256((Path(__file__).read_bytes()+(ROOT/'Dependencies/sources.json').read_bytes()+b''.join(p.read_bytes() for p in sorted((ROOT/'Dependencies/patches').glob('*.patch')))+(ROOT/'Tests/image-codecs.c').read_bytes()+subprocess.check_output(['xcodebuild','-version']))).hexdigest()
+def reusable_stamp(previous,fingerprint,out):
+    outputs=previous.get('outputs',{})
+    return (previous.get('architecture')=='arm64' and previous.get('fingerprint')==fingerprint
+            and bool(outputs) and all((out/name).is_file() and hashlib.sha256((out/name).read_bytes()).hexdigest()==digest
+                                     for name,digest in outputs.items()))
+def publish_archive(source_path,destination):
+    # Reject accidental multi-architecture or foreign staging archives before publication.
+    archs=subprocess.check_output(['xcrun','lipo','-archs',str(source_path)],text=True).split()
+    if archs!=['arm64']:raise SystemExit('Expected arm64-only archive: '+str(source_path))
+    shutil.copy2(source_path,destination)
 stamp=out/(a.components+'-complete.json')
 if stamp.exists():
     previous=json.loads(stamp.read_text())
-    outputs=previous.get('outputs',{})
-    intact=bool(outputs) and all((out/name).is_file() and hashlib.sha256((out/name).read_bytes()).hexdigest()==digest for name,digest in outputs.items())
-    if previous.get('fingerprint')==fingerprint and intact:
+    if reusable_stamp(previous,fingerprint,out):
         print('Reusing verified dependency build:',a.components,flush=True);sys.exit(0)
 logs=out/'logs';logs.mkdir(exist_ok=True)
 def configure_build(name,arch,options,install=True,target=None):
@@ -95,7 +103,7 @@ if a.components in ['ocr','ffmpeg','all']:
     env['PATH']=str(nasm_prefix/'bin')+os.pathsep+env['PATH']
 
 if a.components in ['ocr','all']:
-    for arch in ['arm64','x86_64']:
+    for arch in ['arm64']:
         prefix=out/arch/'ocr';prefix.mkdir(parents=True,exist_ok=True)
         configure_build('png',arch,['-DPNG_FRAMEWORK=OFF','-DPNG_SHARED=ON','-DPNG_STATIC=ON','-DPNG_TESTS=ON','-DPNG_TOOLS=OFF'])
         configure_build('jpeg',arch,['-DENABLE_SHARED=OFF','-DENABLE_STATIC=ON','-DWITH_TURBOJPEG=OFF','-DWITH_TOOLS=ON','-DWITH_TESTS=ON','-DWITH_SIMD=ON','-DCMAKE_ASM_NASM_COMPILER='+str(alias/'output/host-tools/bin/nasm')])
@@ -106,7 +114,7 @@ if a.components in ['ocr','all']:
             '-DENABLE_PNG=ON','-DENABLE_TIFF=ON','-DENABLE_ZLIB=ON','-DJPEG_LIBRARY='+str(prefix/'lib/libjpeg.a'),
             '-DJPEG_INCLUDE_DIR='+str(prefix/'include'),'-DENABLE_JPEG=ON','-DENABLE_GIF=OFF','-DENABLE_WEBP=OFF','-DENABLE_OPENJPEG=OFF'])
         # A real codec round trip supplies the TIFF result CMake cannot execute
-        # automatically in cross-compilation mode. Intel is exercised via Rosetta.
+        # automatically in cross-compilation mode. Execute the arm64 probe natively.
         probe=out/arch/'image-codecs'
         run(['xcrun','clang','-arch',arch,'-mmacosx-version-min=13.0','-I'+str(prefix/'include'),
              str(ROOT/'Tests/image-codecs.c'),prefix/'lib/libleptonica.a',prefix/'lib/libpng16.a',prefix/'lib/libtiff.a',prefix/'lib/libjpeg.a','-lz','-lm','-o',probe],logs/('image-codecs-'+arch+'.log'))
@@ -121,26 +129,26 @@ if a.components in ['ocr','all']:
         shutil.copytree(source('tesseract')/'include/tesseract',prefix/'include/tesseract',dirs_exist_ok=True)
         shutil.copy2(build/'include/tesseract/version.h',prefix/'include/tesseract/version.h')
         shutil.copy2(build/'libtesseract.a',prefix/'lib/libtesseract.a')
-    universal=out/'ocr';(universal/'lib').mkdir(parents=True,exist_ok=True)
-    shutil.copytree(out/'arm64/ocr/include',universal/'include',dirs_exist_ok=True)
+    published=out/'ocr';(published/'lib').mkdir(parents=True,exist_ok=True)
+    shutil.copytree(out/'arm64/ocr/include',published/'include',dirs_exist_ok=True)
     for name in ['libtesseract.a','libleptonica.a','libpng16.a','libtiff.a','libjpeg.a']:
-        subprocess.run(['lipo','-create',str(out/'arm64/ocr/lib'/name),str(out/'x86_64/ocr/lib'/name),'-output',str(universal/'lib'/name)],check=True)
+        publish_archive(out/'arm64/ocr/lib'/name,published/'lib'/name)
     # Keep the historical Leptonica filename while linking JPEG explicitly.
-    shutil.copy2(universal/'lib/libleptonica.a',universal/'lib/liblept.a')
-    for arch in ['arm64','x86_64']:
+    shutil.copy2(published/'lib/libleptonica.a',published/'lib/liblept.a')
+    for arch in ['arm64']:
         for name in ['png','jpeg','tiff']:
             run([ctest,'--test-dir',out/arch/(name+'-verified-build'),'--output-on-failure','--no-tests=error','--parallel','4'],logs/(name+'-'+arch+'-tests.log'))
-    licenses=universal/'licenses';licenses.mkdir(exist_ok=True)
+    licenses=published/'licenses';licenses.mkdir(exist_ok=True)
     for name in ['tesseract','leptonica','png','tiff','jpeg']:
         dest=licenses/name;dest.mkdir(exist_ok=True)
         for item in source(name).iterdir():
             if item.is_file() and (('license' in item.name.lower() or item.name.upper().startswith(('COPYING','README.LEGAL','README.IJG'))) ):shutil.copy2(item,dest/item.name)
-    print('OCR universal archives and upstream image-library tests complete',flush=True)
+    print('OCR published archives and upstream image-library tests complete',flush=True)
 if a.components in ['ffmpeg','all']:
     decoders=['dvdsub','pgssub','aac','mp3','mp2','mp1','ac3','eac3','truehd','alac','opus','vorbis','flac','mlp','dca',
               'pcm_f32be','pcm_f32le','pcm_f64be','pcm_f64le','pcm_s16be','pcm_s16le','pcm_s16le_planar',
               'pcm_s24be','pcm_s24le','pcm_s32be','pcm_s32le','pcm_s8','pcm_u8','pcm_u16be','pcm_u16le','pcm_u24be','pcm_u24le']
-    for arch in ['arm64','x86_64']:
+    for arch in ['arm64']:
         build=alias/'output'/arch/'ffmpeg-verified-build';prefix=alias/'output'/arch/'ffmpeg';build.mkdir(parents=True,exist_ok=True)
         log=logs/('ffmpeg-'+arch+'.log')
         options=['--disable-programs','--disable-filters','--disable-everything','--disable-avdevice','--disable-swscale',
@@ -153,30 +161,30 @@ if a.components in ['ffmpeg','all']:
         run([source('ffmpeg')/'configure']+options,log,cwd=build)
         run(['make','-j6'],log,cwd=build);run(['make','install'],log,cwd=build)
         print('Built FFmpeg',arch,flush=True)
-    universal=out/'ffmpeg';(universal/'lib').mkdir(parents=True,exist_ok=True)
-    shutil.copytree(out/'arm64/ffmpeg/include',universal/'include',dirs_exist_ok=True)
+    published=out/'ffmpeg';(published/'lib').mkdir(parents=True,exist_ok=True)
+    shutil.copytree(out/'arm64/ffmpeg/include',published/'include',dirs_exist_ok=True)
     for name in ['avcodec','avformat','avfilter','avutil','swresample']:
-        subprocess.run(['lipo','-create',str(out/'arm64/ffmpeg/lib'/('lib'+name+'.a')),str(out/'x86_64/ffmpeg/lib'/('lib'+name+'.a')),'-output',str(universal/'lib'/('lib'+name+'.a'))],check=True)
-    licenses=universal/'licenses';licenses.mkdir(exist_ok=True)
+        publish_archive(out/'arm64/ffmpeg/lib'/('lib'+name+'.a'),published/'lib'/('lib'+name+'.a'))
+    licenses=published/'licenses';licenses.mkdir(exist_ok=True)
     for path in source('ffmpeg').glob('COPYING*'):shutil.copy2(path,licenses/path.name)
-    print('FFmpeg universal archives complete',flush=True)
+    print('FFmpeg published archives complete',flush=True)
 if a.components in ['mp4v2','all']:
-    for arch in ['arm64','x86_64']:
+    for arch in ['arm64']:
         prefix=out/arch/'mp4v2';source_path=source('mp4v2');build=out/arch/('mp4v2-build-'+hashlib.sha256(str(source_path).encode()).hexdigest()[:12]);log=logs/('mp4v2-'+arch+'.log')
         run([cmake,'-S',source('mp4v2'),'-B',build,'-G','Ninja','-DCMAKE_POLICY_VERSION_MINIMUM=3.5',
             '-DCMAKE_OSX_ARCHITECTURES='+arch,'-DCMAKE_OSX_DEPLOYMENT_TARGET=13.0','-DCMAKE_BUILD_TYPE=Release',
             '-DBUILD_SHARED=OFF','-DBUILD_UTILS=OFF','-DCMAKE_INSTALL_PREFIX='+str(prefix)],log)
         run([cmake,'--build',build,'--parallel','6'],log);run([cmake,'--install',build],log)
-    universal=out/'mp4v2';(universal/'lib').mkdir(parents=True,exist_ok=True)
-    shutil.copytree(out/'arm64/mp4v2/include',universal/'include',dirs_exist_ok=True)
-    (universal/'include/module.modulemap').write_text('module CMP42 [system] [extern_c] { header \"mp4v2/mp4v2.h\" export * }\n')
-    subprocess.run(['lipo','-create',str(out/'arm64/mp4v2/lib/libmp4v2.a'),str(out/'x86_64/mp4v2/lib/libmp4v2.a'),'-output',str(universal/'lib/libmp4v2.a')],check=True)
-    licenses=universal/'licenses';licenses.mkdir(exist_ok=True)
+    published=out/'mp4v2';(published/'lib').mkdir(parents=True,exist_ok=True)
+    shutil.copytree(out/'arm64/mp4v2/include',published/'include',dirs_exist_ok=True)
+    (published/'include/module.modulemap').write_text('module CMP42 [system] [extern_c] { header \"mp4v2/mp4v2.h\" export * }\n')
+    publish_archive(out/'arm64/mp4v2/lib/libmp4v2.a',published/'lib/libmp4v2.a')
+    licenses=published/'licenses';licenses.mkdir(exist_ok=True)
     for path in source('mp4v2').glob('COPYING*'):shutil.copy2(path,licenses/path.name)
-    print('MP4v2 universal archive complete',flush=True)
+    print('MP4v2 published archive complete',flush=True)
 prefixes=['ocr','ffmpeg','mp4v2'] if a.components=='all' else [a.components]
 outputs={}
 for prefix in prefixes:
     for path in sorted((out/prefix).rglob('*')):
         if path.is_file():outputs[str(path.relative_to(out))]=hashlib.sha256(path.read_bytes()).hexdigest()
-stamp.write_text(json.dumps({'fingerprint':fingerprint,'components':a.components,'outputs':outputs},indent=2)+'\n')
+stamp.write_text(json.dumps({'architecture':'arm64','fingerprint':fingerprint,'components':a.components,'outputs':outputs},indent=2)+'\n')

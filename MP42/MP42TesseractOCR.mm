@@ -61,7 +61,11 @@ MP42_OBJC_DIRECT_MEMBERS
                                                             NSUserDomainMask,
                                                             YES);
     if (allPaths.count) {
-        NSString *path = [[allPaths lastObject] stringByAppendingPathComponent:@"Subler"];
+        // The embedding app owns its OCR downloads; preserve the legacy path
+        // for existing hosts that do not declare a separate support identity.
+        NSString *folder = [NSBundle.mainBundle objectForInfoDictionaryKey:@"MP42ApplicationSupportDirectoryName"];
+        if (![folder isKindOfClass:NSString.class] || !folder.length) { folder = @"Subler"; }
+        NSString *path = [[allPaths lastObject] stringByAppendingPathComponent:folder];
         URL = [NSURL fileURLWithPath:path isDirectory:YES];
 
         if (URL) {
