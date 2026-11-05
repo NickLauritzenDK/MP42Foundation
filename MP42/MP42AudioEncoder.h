@@ -18,6 +18,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (instancetype)initWithInputUnit:(id<MP42AudioUnit>)unit bitRate:(UInt32)bitRate error:(NSError * __autoreleasing *)error;
 
+- (void)cancel;
+
 @property (nonatomic, readonly, nullable) AudioChannelLayout *inputLayout;
 @property (nonatomic, readonly) UInt32 inputLayoutSize;
 @property (nonatomic, readonly) AudioStreamBasicDescription inputFormat;

@@ -322,6 +322,17 @@ MP42_OBJC_DIRECT_MEMBERS
     return _magicCookie;
 }
 
+- (void)cancel
+{
+    [_thread cancel];
+    [_inputSamplesBuffer cancel];
+    [_outputSamplesBuffer cancel];
+    // Retain the unit and its downstream owner until the worker cannot call back.
+    if (NSThread.currentThread != _thread) {
+        while (!_thread.isFinished) [NSThread sleepForTimeInterval:0.001];
+    }
+}
+
 - (void)addSample:(MP42SampleBuffer *)sample
 {
     [_inputSamplesBuffer enqueue:sample];
@@ -438,7 +449,7 @@ static MP42SampleBuffer *flush(AudioConverterRef encoder, AudioFileIO *afio)
 
 static inline void enqueue(MP42AudioEncoder *self, MP42SampleBuffer *outSample)
 {
-    if (outSample) {
+    if (outSample && !self->_thread.isCancelled) {
         if (self->_outputType == MP42AudioUnitOutputPush) {
             [self->_outputUnit addSample:outSample];
         }
@@ -453,7 +464,7 @@ static inline void enqueue(MP42AudioEncoder *self, MP42SampleBuffer *outSample)
     @autoreleasepool {
         MP42SampleBuffer *sampleBuffer = nil;
 
-        while ((sampleBuffer = [_inputSamplesBuffer dequeueAndWait])) {
+        while (!_thread.isCancelled && (sampleBuffer = [_inputSamplesBuffer dequeueAndWait])) {
             @autoreleasepool {
 
                 MP42SampleBuffer *outSample = nil;

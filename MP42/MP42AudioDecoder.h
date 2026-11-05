@@ -26,6 +26,8 @@ NS_ASSUME_NONNULL_BEGIN
                         magicCookie:(nullable NSData *)magicCookie
                               error:(NSError * __autoreleasing *)error;
 
+- (void)cancel;
+
 @property (nonatomic, readonly, nullable) AudioChannelLayout *inputLayout;
 @property (nonatomic, readonly) UInt32 inputLayoutSize;
 @property (nonatomic, readonly) AudioStreamBasicDescription inputFormat;

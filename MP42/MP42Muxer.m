@@ -665,6 +665,21 @@ MP42_OBJC_DIRECT_MEMBERS
 
     dispatch_semaphore_signal(_setupDone);
 
+    if (unsupportedTracks.count) {
+        // Source readers have not started: cancel only converters, never wait
+        // for an importer's reading-completion semaphore here.
+        for (MP42Track *track in [_activeTracks arrayByAddingObjectsFromArray:unsupportedTracks]) {
+            if ([track.converter respondsToSelector:@selector(cancel)]) {
+                [track.converter cancel];
+            }
+            track.converter = nil;
+        }
+        if (outError && !*outError) {
+            *outError = MP42Error(MP42LocalizedString(@"Unsupported track", @"error message"),
+                MP42LocalizedString(@"One or more tracks could not be prepared for writing.", @"error message"), 201);
+        }
+        return NO;
+    }
     return YES;
 }
 

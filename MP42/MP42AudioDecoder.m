@@ -263,6 +263,17 @@ MP42_OBJC_DIRECT_MEMBERS
     return;
 }
 
+- (void)cancel
+{
+    [_decoderThread cancel];
+    [_inputSamplesBuffer cancel];
+    [_outputSamplesBuffer cancel];
+    // Retain the unit and its downstream owner until the worker cannot call back.
+    if (NSThread.currentThread != _decoderThread) {
+        while (!_decoderThread.isFinished) [NSThread sleepForTimeInterval:0.001];
+    }
+}
+
 - (void)addSample:(MP42SampleBuffer *)sample
 {
     [_inputSamplesBuffer enqueue:sample];
@@ -520,7 +531,7 @@ static int receive_frame(MP42DecodeContext *context, MP42SampleBuffer **outSampl
 
 static inline void enqueue(MP42AudioDecoder *self, MP42SampleBuffer *outSample)
 {
-    if (outSample) {
+    if (outSample && !self->_decoderThread.isCancelled) {
         if (self->_outputType == MP42AudioUnitOutputPush) {
             [self->_outputUnit addSample:outSample];
         }
@@ -535,12 +546,28 @@ static inline void enqueue(MP42AudioDecoder *self, MP42SampleBuffer *outSample)
     @autoreleasepool {
         MP42SampleBuffer *sampleBuffer = nil;
 
-        while ((sampleBuffer = [_inputSamplesBuffer dequeueAndWait])) {
+        while (!_decoderThread.isCancelled && (sampleBuffer = [_inputSamplesBuffer dequeueAndWait])) {
             @autoreleasepool {
 
                 MP42SampleBuffer *outSample = nil;
 
                 if (sampleBuffer->flags & MP42SampleBufferFlagEndOfFile) {
+                    // Decode delayed frames before draining the rate converter.
+                    avcodec_send_packet(_context->avctx, NULL);
+                    while (!receive_frame(_context, &outSample)) {
+                        if (!_context->outputConfigured && outSample) {
+                            [_outputUnit reconfigure];
+                            _context->outputConfigured = YES;
+                        }
+                        enqueue(self, outSample);
+                    }
+                    if (_context->resampler) {
+                        uint8_t *pcm = NULL;
+                        int pcmSize = 0;
+                        while (!hb_audio_resample(_context->resampler, NULL, 0, &pcm, &pcmSize)) {
+                            enqueue(self, sampleBufferFromFrame(pcm, pcmSize));
+                        }
+                    }
                     enqueue(self, sampleBuffer);
                     return;
                 }

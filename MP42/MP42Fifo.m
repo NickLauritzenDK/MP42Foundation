@@ -4,127 +4,112 @@
 //
 //  Created by Damiano Galassi on 09/08/13.
 //
-//
 
 #import "MP42Fifo.h"
 
 MP42_OBJC_DIRECT_MEMBERS
 @implementation MP42Fifo {
-@private
     id *_array;
-
-    int32_t     _head;
-    int32_t     _tail;
-
-    int32_t     _size;
-    _Atomic int32_t     _count;
-
-    _Atomic int32_t     _cancelled;
-
-    dispatch_semaphore_t _full;
-    dispatch_semaphore_t _empty;
-
-    dispatch_queue_t _queue;
+    NSUInteger _head;
+    NSUInteger _tail;
+    NSUInteger _size;
+    NSUInteger _count;
+    BOOL _cancelled;
+    NSCondition *_condition;
 }
 
 - (instancetype)init {
-    self = [self initWithCapacity:300];
-    return self;
+    return [self initWithCapacity:300];
 }
 
 - (instancetype)initWithCapacity:(NSUInteger)capacity {
+    NSParameterAssert(capacity >= 2);
     self = [super init];
     if (self) {
-        _size = (int32_t)capacity;
-        _array = (id *) malloc(sizeof(id) * _size);
-        _full = dispatch_semaphore_create(_size - 1);
-        _empty = dispatch_semaphore_create(0);
-        _queue = dispatch_queue_create("org.subler.FifoQueue", DISPATCH_QUEUE_SERIAL);
+        // Preserve the existing ring's usable capacity (one reserved slot).
+        _size = capacity;
+        _array = calloc(_size, sizeof(id));
+        if (!_array) { [self release]; return nil; }
+        _condition = [[NSCondition alloc] init];
     }
     return self;
 }
 
 - (void)enqueue:(id)item {
-    if (_cancelled) return;
-
-    [item retain];
-
-    dispatch_semaphore_wait(_full, DISPATCH_TIME_FOREVER);
-
-    dispatch_sync(_queue, ^{
-        _array[_tail++] = item;
-    });
-
-    if (_tail == _size) {
-        _tail = 0;
+    NSParameterAssert(item != nil);
+    [_condition lock];
+    while (_count == _size - 1 && !_cancelled) {
+        [_condition wait];
     }
+    if (!_cancelled) {
+        _array[_tail] = [item retain];
+        _tail = (_tail + 1) % _size;
+        _count++;
+        [_condition broadcast];
+    }
+    [_condition unlock];
+}
 
-    _count++;
-    dispatch_semaphore_signal(_empty);
+// Caller holds the condition lock. Transfer the ring's retained reference.
+- (nullable id)removeFirstItem NS_RETURNS_RETAINED {
+    if (!_count) { return nil; }
+    id item = _array[_head];
+    _array[_head] = nil;
+    _head = (_head + 1) % _size;
+    _count--;
+    [_condition broadcast];
+    return item;
 }
 
 - (nullable id)dequeue NS_RETURNS_RETAINED {
-    if (!_count) return nil;
-
-    __block id item = nil;
-
-    dispatch_sync(_queue, ^{
-        item = _array[_head++];
-    });
-
-    if (_head == _size) {
-        _head = 0;
-    }
-
-    _count--;
-    dispatch_semaphore_signal(_full);
-
+    [_condition lock];
+    id item = [self removeFirstItem];
+    [_condition unlock];
     return item;
 }
 
 - (nullable id)dequeueAndWait NS_RETURNS_RETAINED {
-    id item = [self dequeue];
-
-    while (!item) {
-        dispatch_semaphore_wait(_empty, DISPATCH_TIME_FOREVER);
-        item = [self dequeue];
+    [_condition lock];
+    while (!_count && !_cancelled) {
+        [_condition wait];
     }
-
+    id item = _cancelled ? nil : [self removeFirstItem];
+    [_condition unlock];
     return item;
 }
 
 - (NSUInteger)count {
-    return _count;
+    [_condition lock];
+    NSUInteger count = _count;
+    [_condition unlock];
+    return count;
 }
 
 - (BOOL)isFull {
-    return (_count >= _size);
+    return self.count >= _size - 1;
 }
 
 - (BOOL)isEmpty {
-    return !_count;
+    return self.count == 0;
 }
 
 - (void)drain {
     id item;
-    while ((item = [self dequeue])) {
-        [item release];
-    }
+    while ((item = [self dequeue])) { [item release]; }
 }
 
 - (void)cancel {
-    _cancelled = 1;
+    [_condition lock];
+    _cancelled = YES;
+    [_condition broadcast];
+    [_condition unlock];
     [self drain];
 }
 
 - (void)dealloc {
     [self drain];
-
-	free(_array);
-    dispatch_release(_full);
-    dispatch_release(_empty);
-    dispatch_release(_queue);
-
+    free(_array);
+    [_condition release];
     [super dealloc];
 }
 

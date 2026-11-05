@@ -139,7 +139,8 @@ int hb_audio_resample_update(hb_audio_resample_t *resample)
     int ret, resample_changed;
 
     resample->resample_needed =
-        (resample->out.sample_fmt != resample->in.sample_fmt ||
+        (resample->out.sample_rate != resample->in.sample_rate ||
+         resample->out.sample_fmt != resample->in.sample_fmt ||
          resample->out.channel_layout != resample->in.channel_layout);
 
     resample_changed =
@@ -250,6 +251,10 @@ int hb_audio_resample(hb_audio_resample_t *resample,
         return 1;
     }
 
+    *out_data = NULL;
+    *out_size_external = 0;
+    if (nsamples == 0 && !resample->resample_needed) return 1;
+
     uint8_t *out;
     int out_size, out_samples;
 
@@ -262,6 +267,8 @@ int hb_audio_resample(hb_audio_resample_t *resample,
                                    resample->resample.sample_fmt, 0);
         int expected_out_samples = (int)av_rescale_rnd(swr_get_delay(resample->avresample, resample->in.sample_rate) +
                                                 nsamples, resample->out.sample_rate, resample->in.sample_rate, AV_ROUND_UP);
+
+        if (expected_out_samples <= 0) return 1;
 
         out_size = av_samples_get_buffer_size(&out_linesize,
                                               resample->out.channels, expected_out_samples,

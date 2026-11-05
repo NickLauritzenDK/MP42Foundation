@@ -883,6 +883,42 @@ static void logCallback(MP4LogLevel loglevel, const char *fmt, va_list ap) {
     }
 }
 
+// Resolve all deferred sources before creating, replacing or editing a destination.
+- (BOOL)prepareFileImportersWithError:(NSError **)outError tokens:(NSMutableArray *)tokens {
+    for (MP42Track *track in self.itracks) {
+        if (track.muxed || [track isMemberOfClass:MP42ChapterTrack.class] || track.importer) {
+            continue;
+        }
+        NSError *sourceError = nil;
+        MP42FileImporter *importer = track.URL ? self.importers[track.URL.path] : nil;
+        if (!importer && track.URL) {
+#ifdef SB_SANDBOX
+            [tokens addObject:[MP42SecurityAccessToken tokenWithObject:track]];
+#endif
+            importer = [[MP42FileImporter alloc] initWithURL:track.URL error:&sourceError];
+        }
+        if (!importer) {
+            NSError *error = sourceError ?: MP42Error(MP42LocalizedString(@"Missing sources.", @"error message"),
+                MP42LocalizedString(@"One or more sources files are missing.", @"error message"), 200);
+            if (outError) { *outError = error; }
+            [_logger writeErrorToLog:error];
+            [self releaseFileImporters];
+            return NO;
+        }
+        self.importers[track.URL.path] = importer;
+        track.importer = importer;
+    }
+    return YES;
+}
+
+- (void)releaseFileImporters {
+    for (MP42Track *track in self.itracks) { track.importer = nil; }
+    for (MP42FileImporter *importer in self.importers.allValues) {
+        for (MP42Track *track in importer.tracks) { track.importer = nil; }
+    }
+    [self.importers removeAllObjects];
+}
+
 - (BOOL)writeToUrl:(NSURL *)url options:(nullable NSDictionary<NSString *, id> *)options error:(NSError * __autoreleasing *)outError {
     BOOL success = YES;
 
@@ -905,6 +941,11 @@ static void logCallback(MP4LogLevel loglevel, const char *fmt, va_list ap) {
             }
             return NO;
         }
+    }
+
+    NSMutableArray *sourceTokens = [NSMutableArray array];
+    if (![self prepareFileImportersWithError:outError tokens:sourceTokens]) {
+        return NO;
     }
 
     if (self.hasFileRepresentation) {
@@ -1009,13 +1050,21 @@ static void logCallback(MP4LogLevel loglevel, const char *fmt, va_list ap) {
         }
     }
 
+    [self releaseFileImporters];
+    [sourceTokens removeAllObjects];
     return success;
 }
 
 - (BOOL)updateMP4FileWithOptions:(nullable NSDictionary<NSString *, id> *)options error:(NSError * __autoreleasing *)outError {
 
+    NSMutableArray *importersTokens = [NSMutableArray array];
+    if (![self prepareFileImportersWithError:outError tokens:importersTokens]) {
+        return NO;
+    }
+    BOOL success = YES;
     // Open the mp4 file
     if (![self startWriting]) {
+        [self releaseFileImporters];
         if (outError) {
             *outError = MP42Error(MP42LocalizedString(@"The file could not be saved.", @"error message"),
                                   MP42LocalizedString(@"You may do not have sufficient permissions for this operation, or the mp4 file is corrupted.", @"error message"),
@@ -1032,9 +1081,6 @@ static void logCallback(MP4LogLevel loglevel, const char *fmt, va_list ap) {
 
     // Init the muxer and prepare the work
     NSMutableArray<MP42Track *> *unsupportedTracks = [[NSMutableArray alloc] init];
-#ifdef SB_SANDBOX
-    NSMutableArray<MP42SecurityAccessToken *> *importersTokens = [[NSMutableArray alloc] init];
-#endif
 
     self.muxer = [[MP42Muxer alloc] initWithFileHandle:self.fileHandle delegate:self logger:_logger options:options];
 
@@ -1043,40 +1089,13 @@ static void logCallback(MP4LogLevel loglevel, const char *fmt, va_list ap) {
             // Reopen the file importers if they are not already open
             // this happens when the object was unarchived from a file.
             if (![track isMemberOfClass:[MP42ChapterTrack class]]) {
-                if (!track.importer && track.URL) {
-                    MP42FileImporter *fileImporter = self.importers[track.URL.path];
-
-                    if (!fileImporter) {
-#ifdef SB_SANDBOX
-                        [importersTokens addObject:[MP42SecurityAccessToken tokenWithObject:track]];
-#endif
-                        fileImporter = [[MP42FileImporter alloc] initWithURL:track.URL error:outError];
-                        if (fileImporter) {
-                            self.importers[track.URL.path] = fileImporter;
-                        }
-                    }
-
-                    if (fileImporter) {
-                        track.importer = fileImporter;
-                    } else {
-                        if (outError) {
-                            NSError *error = MP42Error(MP42LocalizedString(@"Missing sources.", @"error message"),
-                                                       MP42LocalizedString(@"One or more sources files are missing.", @"error message"), 200);
-                            [_logger writeErrorToLog:error];
-                            if (outError) { *outError = error; }
-                        }
-
-                        break;
-                    }
-                }
-
                 // Add the track to the muxer
                 if (track.importer) {
                     if ([self.muxer canAddTrack:track]) {
                         [self.muxer addTrack:track];
                     } else {
                         // We don't know how to handle this type of track.
-                        // Just drop it.
+                        // Report failure rather than silently omit requested media.
                         NSError *error = MP42Error(MP42LocalizedString(@"Unsupported track", @"error message"),
                                                    [NSString stringWithFormat:@"%@, %u, has not been muxed.", track.name, (unsigned int)track.format],
                                                    201);
@@ -1085,14 +1104,17 @@ static void logCallback(MP4LogLevel loglevel, const char *fmt, va_list ap) {
                         if (outError) { *outError = error; }
 
                         [unsupportedTracks addObject:track];
+                        success = NO;
                     }
                 }
             }
         }
     }
 
-    [self.muxer setup:outError];
-    [self.muxer work];
+    if (success && ![self.muxer setup:outError]) {
+        success = NO;
+    }
+    if (success) { [self.muxer work]; }
     self.muxer = nil;
 
     // Remove the unsupported tracks from the array of the tracks
@@ -1101,38 +1123,29 @@ static void logCallback(MP4LogLevel loglevel, const char *fmt, va_list ap) {
     NSMutableArray<MP42Track *> *tracksToUpdate = [self.itracks mutableCopy];
     [tracksToUpdate removeObjectsInArray:unsupportedTracks];
 
-    for (MP42Track *track in self.itracks) {
-        track.importer = nil;
-    }
-
-    for (MP42FileImporter *importer in self.importers.allValues) {
-        for (MP42Track *track in importer.tracks) {
-            track.importer = nil;
-        }
-    }
-
-#ifdef SB_SANDBOX
+    [self releaseFileImporters];
     [importersTokens removeAllObjects];
-#endif
-    [self.importers removeAllObjects];
 
-    // Update moov atom
-    updateMoovDuration(self.fileHandle);
-    updateMajorBrand(self.fileHandle, self.URL);
+    if (success) {
+        // Update moov atom
+        updateMoovDuration(self.fileHandle);
+        updateMajorBrand(self.fileHandle, self.URL);
 
-    // Update modified tracks properties
-    for (MP42Track *track in tracksToUpdate) {
-        if (track.isEdited) {
-            if (![track writeToFile:self.fileHandle error:outError]) {
-                if (outError && *outError) {
-                    [_logger writeErrorToLog:*outError];
+        // Update modified tracks properties
+        for (MP42Track *track in tracksToUpdate) {
+            if (track.isEdited) {
+                if (![track writeToFile:self.fileHandle error:outError]) {
+                    success = NO;
+                    if (outError && *outError) {
+                        [_logger writeErrorToLog:*outError];
+                    }
                 }
             }
         }
-    }
 
-    // Update metadata
-    [self.metadata writeMetadataWithFileHandle:self.fileHandle];
+        // Update metadata
+        if (success) { [self.metadata writeMetadataWithFileHandle:self.fileHandle]; }
+    }
 
     // Close the mp4 file handle
     if (![self stopWriting]) {
@@ -1145,6 +1158,12 @@ static void logCallback(MP4LogLevel loglevel, const char *fmt, va_list ap) {
         return NO;
     }
 
+    if (!success) {
+        if (outError && !*outError) {
+            *outError = MP42Error(MP42LocalizedString(@"The file could not be saved.", @"error message"), nil, 201);
+        }
+        return NO;
+    }
     // Generate previews images for chapters
     if ([options[MP42GenerateChaptersPreviewTrack] boolValue] && self.itracks.count) {
         [self createChaptersPreviewAtPosition:[options[MP42ChaptersPreviewPosition] floatValue]];

@@ -14,6 +14,8 @@ NS_ASSUME_NONNULL_BEGIN
 @protocol MP42ConverterProtocol <NSObject>
 
 @optional
+// Stop worker queues when setup fails before any source reader starts.
+- (void)cancel;
 - (nullable NSData *)magicCookie;
 
 @required

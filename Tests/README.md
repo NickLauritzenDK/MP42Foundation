@@ -45,3 +45,23 @@ This is targeted characterization, not proof of complete UI or feature parity. I
 - `mp4v2-director.c`: standalone source-built MP4v2 create/store/reopen with Unicode Director metadata, verifying the API already required by Subler's original writer.
 
 The original release's OCR and FFmpeg tests pass in `--allow-old` characterization mode and fail their new runtime-version assertions before the upgrade. Official audio reference recording is guarded by the original framework hash. The 454 original editing/state traces and 5 original media workflows remain frozen; modernization must not bless candidate output as a new reference.
+
+## Audio correctness regressions
+
+`python3 Tests/run-audio-correctness-test.py /path/to/MP42Foundation.framework /path/to/output`
+uses generated stereo PCM at 22.05, 24, 32, 44.1, 48 and 96 kHz through the real import/conversion/mux/reopen path. It checks duration (70 ms tolerance for packet/codec framing), a 440 Hz tone (4 Hz zero-crossing tolerance), 48 kHz output and MP4 timebase, and a silent tail. A direct AC3 encoder probe checks that a partial last input frame pads with silence rather than reusing old PCM. A direct decoder probe verifies that one second of 96 kHz PCM produces exactly 48,000 frames after draining the resampler. It also checks cancellation of idle AC3/AAC encoder and decoder workers, with a process timeout to catch a blocked join. macOS audio codec access is required; restricted processes may produce AudioToolbox `fmt?` errors.
+
+The independent C resampler probe can be built with the generated FFmpeg dependencies:
+
+```sh
+xcrun clang -IMP42/muxer -I/path/to/ffmpeg/include Tests/audio-resample.c MP42/muxer/audio_resample.c /path/to/ffmpeg/lib/libswresample.a /path/to/ffmpeg/lib/libavutil.a -framework Accelerate -o /path/to/output/audio-resample
+/path/to/output/audio-resample
+```
+
+It verifies rate-only stereo float conversion from 96 to 48 kHz, including the delayed output flushed at EOF. These are correctness assertions separate from the frozen official-release audio characterization; they do not replace or regenerate its golden data. The production AC3 encoder retains its existing 48 kHz output policy and now converts input samples to that rate.
+
+Saving/error regressions: `python3 Tests/run-save-failures.py APP_OR_FRAMEWORK OUTPUT [--arch arm64|x86_64]` exercises missing-source protection, relinking/retry, track-write error propagation and partial setup cancellation/retry. AudioToolbox requires a normal developer session.
+
+FIFO regressions: `python3 Tests/run-fifo-test.py APP_OR_FRAMEWORK OUTPUT [--arch arm64|x86_64]` compiles the actual non-ARC queue source, covering blocking readers/writers, cancellation, retained ownership, ordering and multiple concurrent producers/readers.
+
+`run-audio-correctness-test.py` also accepts an app bundle, `--arch` and `--dependencies PATH`; it tests the actual framework plus the separately compiled production resampler.

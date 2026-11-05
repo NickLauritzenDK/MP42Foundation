@@ -19,6 +19,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (instancetype)initWithTrack:(MP42AudioTrack *)track settings:(MP42AudioConversionSettings *)settings error:(NSError * __autoreleasing *)error;
 
+- (void)cancel;
 - (void)addSample:(MP42SampleBuffer *)sample;
 - (nullable MP42SampleBuffer *)copyEncodedSample;
 

@@ -12,6 +12,7 @@
 #import "MP42PrivateUtilities.h"
 #include "sfifo.h"
 #include "FFmpegUtils.h"
+#include "audio_resample.h"
 
 #define FIFO_DURATION (2.5f)
 
@@ -46,6 +47,7 @@ MP42_OBJC_DIRECT_MEMBERS
     MP42AudioUnitOutput _outputType;
 
     NSData *_magicCookie;
+    hb_audio_resample_t *_resampler;
 }
 
 @property (nonatomic, readonly) NSUInteger bitrate;
@@ -135,6 +137,13 @@ MP42_OBJC_DIRECT_MEMBERS
         return NO;
     }
     
+    _resampler = hb_audio_resample_init(AV_SAMPLE_FMT_FLT, _avctx->ch_layout.u.mask,
+                                        AV_MATRIX_ENCODING_NONE, _avctx->sample_rate, 0);
+    hb_audio_resample_set_channel_layout(_resampler,
+                                         convert_layout_to_av(_inputLayout, _inputLayoutSize));
+    hb_audio_resample_set_sample_rate(_resampler, _inputFormat.mSampleRate);
+    if (hb_audio_resample_update(_resampler)) return NO;
+
     _ringBuffer = (sfifo_t *) malloc(sizeof(sfifo_t));
     int ringbuffer_len = _inputFormat.mSampleRate * FIFO_DURATION * 4 * 23;
     sfifo_init(_ringBuffer, ringbuffer_len);
@@ -145,9 +154,9 @@ MP42_OBJC_DIRECT_MEMBERS
     _afio->inBufferSize = 1024 * 64;
     _afio->inBuffer     = malloc(_afio->inBufferSize);
 
-    _afio->inSizePerPacket = _inputFormat.mBytesPerPacket;
+    _afio->inSizePerPacket = sizeof(float) * _avctx->ch_layout.nb_channels;
     _afio->inSamples = _outputFormat.mFramesPerPacket;
-    _afio->channelsPerFrame = _inputFormat.mChannelsPerFrame;
+    _afio->channelsPerFrame = _avctx->ch_layout.nb_channels;
 
     _afio->ringBuffer = _ringBuffer;
 
@@ -180,6 +189,10 @@ MP42_OBJC_DIRECT_MEMBERS
 
 - (void)disposeConverter
 {
+    if (_resampler) {
+        hb_audio_resample_free(_resampler);
+        _resampler = NULL;
+    }
     if (_afio)
     {
         if (_afio->samples)
@@ -299,6 +312,17 @@ MP42_OBJC_DIRECT_MEMBERS
     return _magicCookie;
 }
 
+- (void)cancel
+{
+    [_thread cancel];
+    [_inputSamplesBuffer cancel];
+    [_outputSamplesBuffer cancel];
+    // Retain the unit and its downstream owner until the worker cannot call back.
+    if (NSThread.currentThread != _thread) {
+        while (!_thread.isFinished) [NSThread sleepForTimeInterval:0.001];
+    }
+}
+
 - (void)addSample:(MP42SampleBuffer *)sample
 {
     [_inputSamplesBuffer enqueue:sample];
@@ -326,6 +350,10 @@ static MP42SampleBuffer *encode(AVCodecContext *context, AudioFileIO *afio)
         return nil;
     }
     
+    // AC3 requires complete frames; never reuse PCM beyond a partial EOF read.
+    memset((uint8_t *)afio->inBuffer + outNumBytes, 0,
+           afio->inSamples * afio->inSizePerPacket - outNumBytes);
+
     // Populate the AVFrame with the samples
     float *pEnc = afio->samples;
     float *pIn   = afio->inBuffer;
@@ -372,7 +400,7 @@ static MP42SampleBuffer *flush(AVCodecContext *context, AudioFileIO *afio)
 
 static inline void enqueue(MP42AC3AudioEncoder *self, MP42SampleBuffer *outSample)
 {
-    if (outSample) {
+    if (outSample && !self->_thread.isCancelled) {
         if (self->_outputType == MP42AudioUnitOutputPush) {
             [self->_outputUnit addSample:outSample];
         }
@@ -387,13 +415,20 @@ static inline void enqueue(MP42AC3AudioEncoder *self, MP42SampleBuffer *outSampl
     @autoreleasepool {
         MP42SampleBuffer *sampleBuffer = nil;
 
-        while ((sampleBuffer = [_inputSamplesBuffer dequeueAndWait])) {
+        while (!_thread.isCancelled && (sampleBuffer = [_inputSamplesBuffer dequeueAndWait])) {
             @autoreleasepool {
 
                 MP42SampleBuffer *outSample = nil;
 
                 if (sampleBuffer->flags & MP42SampleBufferFlagEndOfFile) {
                     if (_avctx) {
+                        uint8_t *pcm = NULL;
+                        int pcmSize = 0;
+                        while (!hb_audio_resample(_resampler, NULL, 0, &pcm, &pcmSize)) {
+                            sfifo_write(_ringBuffer, pcm, pcmSize);
+                            free(pcm);
+                            while ((outSample = encode(_avctx, _afio))) enqueue(self, outSample);
+                        }
                         _afio->done = true;
                         while ((outSample = flush(_avctx, _afio))) {
                             enqueue(self, outSample);
@@ -405,7 +440,15 @@ static inline void enqueue(MP42AC3AudioEncoder *self, MP42SampleBuffer *outSampl
                 }
                 else {
                     if (_avctx) {
-                        sfifo_write(_ringBuffer, sampleBuffer->data, sampleBuffer->size);
+                        const uint8_t *input = sampleBuffer->data;
+                        uint8_t *pcm = NULL;
+                        int pcmSize = 0;
+                        if (!hb_audio_resample(_resampler, &input,
+                                               (int)(sampleBuffer->size / _inputFormat.mBytesPerFrame),
+                                               &pcm, &pcmSize)) {
+                            sfifo_write(_ringBuffer, pcm, pcmSize);
+                            free(pcm);
+                        }
                         while ((outSample = encode(_avctx, _afio))) {
                             enqueue(self, outSample);
                         }

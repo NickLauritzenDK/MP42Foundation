@@ -121,6 +121,14 @@ MP42_OBJC_DIRECT_MEMBERS
     return asbd;
 }
 
+- (void)cancel
+{
+    // Stop the consumer first, waking a decoder blocked on its input FIFO.
+    // Both units stay retained until the decoder has stopped calling the encoder.
+    [_encoder cancel];
+    [_decoder cancel];
+}
+
 - (void)addSample:(MP42SampleBuffer *)sample
 {
     [_decoder addSample:sample];
@@ -136,7 +144,10 @@ MP42_OBJC_DIRECT_MEMBERS
 }
 
 - (double)sampleRate {
-    double sampleRate = self.decoder.outputFormat.mSampleRate;
+    // The AC3 encoder converts to 48 kHz, including before its first frame.
+    if ([self.encoder isKindOfClass:MP42AC3AudioEncoder.class]) return 48000;
+    double sampleRate = self.encoder.outputFormat.mSampleRate;
+    if (!sampleRate) sampleRate = self.decoder.outputFormat.mSampleRate;
     if (sampleRate > 48000) {
         return 48000;
     }
