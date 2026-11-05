@@ -95,7 +95,17 @@ MP42_OBJC_DIRECT_MEMBERS
 
         if (_avctx && magicCookie) {
 
-            _avctx->extradata = (uint8_t *)av_malloc(magicCookie.length + AV_INPUT_BUFFER_PADDING_SIZE);
+            // Importers expose ALAC's 24-byte configuration. FFmpeg expects
+            // that configuration inside a 36-byte QuickTime 'alac' full box.
+            // Keep the importer cookie unchanged for remuxing/other consumers.
+            if (codecID == AV_CODEC_ID_ALAC && magicCookie.length == 24) {
+                const uint8_t header[] = {0, 0, 0, 36, 'a', 'l', 'a', 'c', 0, 0, 0, 0};
+                NSMutableData *extradata = [NSMutableData dataWithBytes:header length:sizeof(header)];
+                [extradata appendData:magicCookie];
+                magicCookie = extradata;
+            }
+
+            _avctx->extradata = (uint8_t *)av_mallocz(magicCookie.length + AV_INPUT_BUFFER_PADDING_SIZE);
             if (!_avctx->extradata) {
                 NSLog(@"Could not av_malloc extradata");
                 avcodec_free_context(&_avctx);

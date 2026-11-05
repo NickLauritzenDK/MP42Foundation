@@ -11,6 +11,8 @@
 #import "MP42File.h"
 #import "MP42FileImporter.h"
 #import "MP42FileImporter+Private.h"
+#import "MP42AVFImporter.h"
+#import "MP42MP4Importer.h"
 
 #import "MP42SampleBuffer.h"
 #import "MP42AudioConverter.h"
@@ -803,6 +805,36 @@ MP42_OBJC_DIRECT_MEMBERS
         for (MP42FileImporter *importerHelper in trackImportersArray) {
             for (MP42Track *track in importerHelper.outputsTracks)
                 [importerHelper cleanUp:track fileHandle:_fileHandle];
+        }
+        // AVFoundation/MP4 lossless inputs have no source codec delay to remove. Their copied
+        // presentation edits need to skip the new AAC encoder's leading frames.
+        // Keep existing gaps/durations; do not apply this policy to compressed
+        // source codecs whose own edits and decoder padding need separate care.
+        for (MP42Track *track in _activeTracks) {
+            if ((track.format != kMP42AudioCodecType_LinearPCM && track.format != kAudioFormatAppleLossless) ||
+                track.conversionSettings.format != kAudioFormatMPEG4AAC ||
+                (![track.importer isKindOfClass:MP42AVFImporter.class] &&
+                 ![track.importer isKindOfClass:MP42Mp4Importer.class]) || !track.timescale ||
+                ![track.converter isKindOfClass:MP42AudioConverter.class]) continue;
+            uint32_t delay = ((MP42AudioConverter *)track.converter).encoderDelay;
+            if (!delay) continue;
+            uint32_t count = MP4GetTrackNumberOfEdits(_fileHandle, track.trackId);
+            if (count) {
+                uint64_t version = 0;
+                MP4GetTrackIntegerProperty(_fileHandle, track.trackId, "edts.elst.version", &version);
+                for (uint32_t i = 1; i <= count; i++) {
+                    MP4Timestamp start = MP4GetTrackEditMediaStart(_fileHandle, track.trackId, i);
+                    if (start != MP4_INVALID_TIMESTAMP && !(version == 0 && start == UINT32_MAX)) {
+                        uint32_t scale = MP4GetTrackTimeScale(_fileHandle, track.trackId);
+                        MP4Timestamp converted = (MP4Timestamp)((long double)start * scale / track.timescale);
+                        MP4SetTrackEditMediaStart(_fileHandle, track.trackId, i, converted + delay);
+                    }
+                }
+            } else {
+                MP4Duration duration = (MP4Duration)((long double)track.duration * MP4GetTimeScale(_fileHandle) / 1000);
+                MP4AddTrackEdit(_fileHandle, track.trackId, MP4_INVALID_EDIT_ID, delay, duration, 0);
+                MP4SetTrackIntegerProperty(_fileHandle, track.trackId, "tkhd.duration", duration);
+            }
         }
     }
 }

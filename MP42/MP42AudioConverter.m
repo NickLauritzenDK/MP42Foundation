@@ -143,6 +143,10 @@ MP42_OBJC_DIRECT_MEMBERS
     return _encoder.magicCookie;
 }
 
+- (uint32_t)encoderDelay {
+    return [_encoder isKindOfClass:MP42AudioEncoder.class] ? ((MP42AudioEncoder *)_encoder).primeInfo.leadingFrames : 0;
+}
+
 - (double)sampleRate {
     // The AC3 encoder converts to 48 kHz, including before its first frame.
     if ([self.encoder isKindOfClass:MP42AC3AudioEncoder.class]) return 48000;

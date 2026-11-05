@@ -91,6 +91,18 @@ MP42_OBJC_DIRECT_MEMBERS
             uint64_t channels_count = 0;
             MP4GetTrackIntegerProperty(fileHandle, self.trackId, "mdia.minf.stbl.stsd.alac.channels", &channels_count);
             _channels = (UInt32)channels_count;
+            // QuickTime's ALAC sample entry can retain the legacy value 2.
+            // The ALACSpecificConfig contains the actual channel count.
+            uint8_t *config = NULL;
+            uint32_t configSize = 0;
+            if (MP4GetTrackBytesProperty(fileHandle, self.trackId,
+                                        "mdia.minf.stbl.stsd.alac.alac.AppleLosslessMagicCookie",
+                                        &config, &configSize) && config && configSize == 24 &&
+                config[9] >= 1 && config[9] <= 8) {
+                _channels = config[9];
+            }
+            free(config);
+            _channelLayoutTag = getDefaultChannelLayout(_channels);
         }
         else if (MP4HaveTrackAtom(fileHandle, self.trackId, "mdia.minf.stbl.stsd.twos")) {
             uint64_t channels_count = 0;
