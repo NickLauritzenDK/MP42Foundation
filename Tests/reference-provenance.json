@@ -1,0 +1,14 @@
+{
+  "subler_release": "1.9.5",
+  "source_commit": "9077b6d149be621ff7d7b0d8eb46839a56610844",
+  "release_asset": "https://github.com/SublerApp/Subler/releases/download/1.9.5/Subler-1.9.5.zip",
+  "release_asset_sha256": "446cfe23d7b85063176afc7bf5cdd75e3eb267c0b23ae9831c85ed37d08e2f85",
+  "framework_sha256": "bc3e81586bf0f1dd263c4297fea64dd1db9cf2387b65762229b26571e19b010f",
+  "synthetic_aac_sha256": "e12d24d62c52625e6a238e011923032c358dda081a2a5b5a7a0817dc492482f5",
+  "recorded_on": "2026-11-05",
+  "recorded_architecture": "arm64",
+  "known_upstream_exceptions": {
+    "track-editing": 19,
+    "description": "Reverse-ordered multi-track removal can raise NSRangeException during undo. Golden traces preserve these upstream outcomes; this repair does not fix that separate bug."
+  }
+}

@@ -446,47 +446,58 @@ static void logCallback(MP4LogLevel loglevel, const char *fmt, va_list ap) {
 
 #pragma mark - Editing
 
-- (void)addTrack:(MP42Track *)track {
-    NSAssert(self.status != MP42StatusWriting, @"Unsupported operation: trying to add a track while the file is open for writing");
-    NSAssert(![self.itracks containsObject:track], @"Unsupported operation: trying to add a track that is already present.");
+- (void)prepareTrackForInsertion:(MP42Track *)track {
+    track.undo = self.undo;
+    track.sourceId = track.trackId;
+    track.trackId = 0;
+    track.muxed = NO;
+    track.edited = YES;
 
-    if (!(self.undo.isUndoing || self.undo.isRedoing)) {
-        track.sourceId = track.trackId;
-        track.trackId = 0;
-        track.muxed = NO;
-        track.edited = YES;
-
-        track.language = track.language;
-        track.name = track.name;
-        if ([track isMemberOfClass:[MP42ChapterTrack class]]) {
-            for (id previousTrack in self.itracks)
-                if ([previousTrack isMemberOfClass:[MP42ChapterTrack class]]) {
-                    [self.itracks removeObject:previousTrack];
-                    break;
-                }
-        }
-
-        if (trackNeedConversion(track.format) && ![track isMemberOfClass:[MP42ChapterTrack class]]) {
-            NSAssert(track.conversionSettings, @"Missing conversion settings");
-        }
-
-        if ([track isMemberOfClass:[MP42AudioTrack class]]) {
-            MP42AudioTrack *audioTrack = (MP42AudioTrack *)track;
-            MP42Track *fallbackTrack = audioTrack.fallbackTrack;
-            if (fallbackTrack && ![self.itracks containsObject:fallbackTrack]) {
-                audioTrack.fallbackTrack = nil;
+    track.language = track.language;
+    track.name = track.name;
+    if ([track isMemberOfClass:[MP42ChapterTrack class]]) {
+        for (id previousTrack in self.itracks)
+            if ([previousTrack isMemberOfClass:[MP42ChapterTrack class]]) {
+                [self.itracks removeObject:previousTrack];
+                break;
             }
-        }
+    }
 
-        if ([track isMemberOfClass:[MP42ChapterTrack class]]) {
-            track.duration = self.duration;
+    if (trackNeedConversion(track.format) && ![track isMemberOfClass:[MP42ChapterTrack class]]) {
+        NSAssert(track.conversionSettings, @"Missing conversion settings");
+    }
+
+    if ([track isMemberOfClass:[MP42AudioTrack class]]) {
+        MP42AudioTrack *audioTrack = (MP42AudioTrack *)track;
+        MP42Track *fallbackTrack = audioTrack.fallbackTrack;
+        if (fallbackTrack && ![self.itracks containsObject:fallbackTrack]) {
+            audioTrack.fallbackTrack = nil;
         }
     }
 
-    track.undo = self.undo;
+    if ([track isMemberOfClass:[MP42ChapterTrack class]]) {
+        track.duration = self.duration;
+    }
+}
 
+- (void)addTrack:(MP42Track *)track {
+    NSAssert(self.status != MP42StatusWriting, @"Unsupported operation: trying to add a track while the file is open for writing");
+    NSAssert(![self.itracks containsObject:track], @"Unsupported operation: trying to add a track that is already present.");
     [[self.undo prepareWithInvocationTarget:self] removeTracks:@[track]];
+    if (!(self.undo.isUndoing || self.undo.isRedoing)) {
+        [self prepareTrackForInsertion:track];
+    }
     [self.itracks addObject:track];
+}
+
+- (void)insertTrack:(MP42Track *)track atIndex:(NSUInteger)index {
+    NSAssert(self.status != MP42StatusWriting, @"Unsupported operation: trying to add a track while the file is open for writing");
+    NSAssert(![self.itracks containsObject:track], @"Unsupported operation: trying to add a track that is already present.");
+    [[self.undo prepareWithInvocationTarget:self] removeTracks:@[track]];
+    if (!(self.undo.isUndoing || self.undo.isRedoing)) {
+        [self prepareTrackForInsertion:track];
+    }
+    [self.itracks insertObject:track atIndex:index];
 }
 
 - (void)addToBeDeleted:(MP42Track *)track
@@ -537,37 +548,48 @@ static void logCallback(MP4LogLevel loglevel, const char *fmt, va_list ap) {
         }
     }
 
-    for (MP42Track *track in tracks) {
-        [(MP42File *)[self.undo prepareWithInvocationTarget:self] addTrack:track];
+    // Undo invokes registered operations in reverse order. Register the last
+    // selected track first so ascending selections regain their original slots.
+    for (MP42Track *track in tracks.reverseObjectEnumerator) {
+        NSUInteger index = [self.itracks indexOfObject:track];
+        [(MP42File *)[self.undo prepareWithInvocationTarget:self] insertTrack:track atIndex:index];
     }
 
     [self.itracks removeObjectsInArray:tracks];
 }
 
-- (void)moveTrackAtIndex:(NSUInteger)index toIndex:(NSUInteger)newIndex {
-    NSAssert(self.status != MP42StatusWriting, @"Unsupported operation: trying to move tracks while the file is open for writing");
-    id track = [self.itracks objectAtIndex:index];
-
-    [self.itracks removeObjectAtIndex:index];
-    if (newIndex > self.itracks.count || newIndex > index) {
-        newIndex--;
-    }
-    [self.itracks insertObject:track atIndex:newIndex];
-}
-
 - (void)moveTracks:(NSArray<MP42Track *> *)tracks toIndex:(NSUInteger)index {
     NSAssert(self.status != MP42StatusWriting, @"Unsupported operation: trying to move tracks while the file is open for writing");
-
-    for (id track in tracks.reverseObjectEnumerator) {
+    NSMutableArray<NSNumber *> *sourceIndexes = [NSMutableArray array];
+    NSMutableArray<NSNumber *> *destIndexes = [NSMutableArray array];
+    for (MP42Track *track in tracks.reverseObjectEnumerator) {
         NSUInteger sourceIndex = [self.itracks indexOfObject:track];
         [self.itracks removeObjectAtIndex:sourceIndex];
-
         if (sourceIndex < index) {
             index--;
         }
-
         [self.itracks insertObject:track atIndex:index];
+        [sourceIndexes addObject:@(sourceIndex)];
+        [destIndexes addObject:@(index)];
     }
+    // Each index refers to the array at that step, so undo reverses both steps
+    // and their directions rather than treating the indexes as a batch move.
+    [[self.undo prepareWithInvocationTarget:self]
+        moveTracksAtIndexes:destIndexes.reverseObjectEnumerator.allObjects
+                  toIndexes:sourceIndexes.reverseObjectEnumerator.allObjects];
+}
+
+- (void)moveTracksAtIndexes:(NSArray<NSNumber *> *)indexes toIndexes:(NSArray<NSNumber *> *)destIndexes {
+    NSAssert(self.status != MP42StatusWriting, @"Unsupported operation: trying to move tracks while the file is open for writing");
+    NSParameterAssert(indexes.count == destIndexes.count);
+    for (NSUInteger i = 0; i < indexes.count; i++) {
+        MP42Track *track = self.itracks[indexes[i].unsignedIntegerValue];
+        [self.itracks removeObjectAtIndex:indexes[i].unsignedIntegerValue];
+        [self.itracks insertObject:track atIndex:destIndexes[i].unsignedIntegerValue];
+    }
+    [[self.undo prepareWithInvocationTarget:self]
+        moveTracksAtIndexes:destIndexes.reverseObjectEnumerator.allObjects
+                  toIndexes:indexes.reverseObjectEnumerator.allObjects];
 }
 
 - (void)organizeAlternateGroupsForMediaTypes:(NSArray *)mediaTypes withGroupID:(NSUInteger)groupID {
