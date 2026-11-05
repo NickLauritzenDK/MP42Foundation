@@ -65,3 +65,7 @@ Saving/error regressions: `python3 Tests/run-save-failures.py APP_OR_FRAMEWORK O
 FIFO regressions: `python3 Tests/run-fifo-test.py APP_OR_FRAMEWORK OUTPUT [--arch arm64|x86_64]` compiles the actual non-ARC queue source, covering blocking readers/writers, cancellation, retained ownership, ordering and multiple concurrent producers/readers.
 
 `run-audio-correctness-test.py` also accepts an app bundle, `--arch` and `--dependencies PATH`; it tests the actual framework plus the separately compiled production resampler.
+
+## Neo recipe integrity
+
+Run `python3 Tests/test-arm64-recipe.py` and `python3 Tests/test-source-verification.py` from the framework root. These tests check arm64-only archive publication, rejected foreign/multiple slices, architecture/fingerprint/output cache invalidation, and verified source extraction without a compiler or network. They do not replace a full dependency rebuild and upstream runtime tests.
