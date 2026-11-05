@@ -58,7 +58,7 @@ hb_audio_resample_t* hb_audio_resample_init(enum AVSampleFormat sample_fmt,
     //}
 
     // requested output channel_layout, sample_fmt
-    resample->out.channels = av_get_channel_layout_nb_channels(channel_layout);
+    resample->out.channels = __builtin_popcountll(channel_layout);
     resample->out.channel_layout      = channel_layout;
     resample->out.sample_rate         = sample_rate;
     resample->out.matrix_encoding     = matrix_encoding;
@@ -165,12 +165,16 @@ int hb_audio_resample_update(hb_audio_resample_t *resample)
 
             av_opt_set_int(resample->avresample, "out_sample_fmt",
                            resample->out.sample_fmt, 0);
-            av_opt_set_int(resample->avresample, "out_channel_layout",
-                           resample->out.channel_layout, 0);
+            AVChannelLayout out_layout = {0};
+            av_channel_layout_from_mask(&out_layout, resample->out.channel_layout);
+            av_opt_set_chlayout(resample->avresample, "out_chlayout", &out_layout, 0);
+            av_channel_layout_uninit(&out_layout);
             av_opt_set_int(resample->avresample, "out_sample_rate",
                            resample->out.sample_rate, 0);
             av_opt_set_int(resample->avresample, "matrix_encoding",
                            resample->out.matrix_encoding, 0);
+            // Keep the historical no-op option: substituting rematrix_maxval
+            // would change the downmix normalization policy in this API migration.
             av_opt_set_int(resample->avresample, "normalize_mix_level",
                            resample->out.normalize_mix_level, 0);
         }
@@ -181,8 +185,10 @@ int hb_audio_resample_update(hb_audio_resample_t *resample)
 
         av_opt_set_int(resample->avresample, "in_sample_fmt",
                        resample->in.sample_fmt, 0);
-        av_opt_set_int(resample->avresample, "in_channel_layout",
-                       resample->in.channel_layout, 0);
+        AVChannelLayout in_layout = {0};
+        av_channel_layout_from_mask(&in_layout, resample->in.channel_layout);
+        av_opt_set_chlayout(resample->avresample, "in_chlayout", &in_layout, 0);
+        av_channel_layout_uninit(&in_layout);
         av_opt_set_int(resample->avresample, "in_sample_rate",
                        resample->in.sample_rate, 0);
         av_opt_set_double(resample->avresample, "lfe_mix_level",
@@ -206,7 +212,7 @@ int hb_audio_resample_update(hb_audio_resample_t *resample)
         resample->resample.sample_fmt         = resample->in.sample_fmt;
         resample->resample.channel_layout     = resample->in.channel_layout;
         resample->resample.channels           =
-            av_get_channel_layout_nb_channels(resample->in.channel_layout);
+            __builtin_popcountll(resample->in.channel_layout);
         resample->resample.sample_rate        = resample->in.sample_rate;
         resample->resample.lfe_mix_level      = resample->in.lfe_mix_level;
         resample->resample.center_mix_level   = resample->in.center_mix_level;

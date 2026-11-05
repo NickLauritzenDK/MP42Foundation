@@ -95,7 +95,7 @@ MP42_OBJC_DIRECT_MEMBERS
 
 - (BOOL)initConverterWithBitRate:(NSUInteger)bitrate
 {
-    AVCodec *codec = avcodec_find_encoder(AV_CODEC_ID_AC3);
+    const AVCodec *codec = avcodec_find_encoder(AV_CODEC_ID_AC3);
     if (!codec) {
         if ([[NSString stringWithFormat:@"%s", avcodec_configuration()] rangeOfString:@"--enable-encoder=ac3"].location == NSNotFound) {
             NSLog(@"Codec not found. Compile ffmpeg with configuration: %s --enable-encoder=ac3", avcodec_configuration());
@@ -116,14 +116,13 @@ MP42_OBJC_DIRECT_MEMBERS
     _avctx->sample_fmt     = AV_SAMPLE_FMT_FLTP;
     _avctx->sample_rate    = 48000;
     
-    _avctx->channel_layout = channel_layout_for_channels(codec, _inputFormat.mChannelsPerFrame);
-    _avctx->channels       = av_get_channel_layout_nb_channels(_avctx->channel_layout);
+    av_channel_layout_from_mask(&_avctx->ch_layout, channel_layout_for_channels(codec, _inputFormat.mChannelsPerFrame));
 
     AudioStreamBasicDescription outputFormat;
     bzero(&outputFormat, sizeof(AudioStreamBasicDescription));
     outputFormat.mFormatID = kAudioFormatAC3;
     outputFormat.mSampleRate = _avctx->sample_rate;
-    outputFormat.mChannelsPerFrame = _avctx->channels;
+    outputFormat.mChannelsPerFrame = _avctx->ch_layout.nb_channels;
     outputFormat.mFramesPerPacket = 1536;
     outputFormat.mBytesPerPacket = 4 * outputFormat.mChannelsPerFrame;
     outputFormat.mBytesPerFrame = outputFormat.mBytesPerPacket * outputFormat.mFramesPerPacket;
@@ -160,17 +159,16 @@ MP42_OBJC_DIRECT_MEMBERS
     
     _afio->frame->nb_samples     = _avctx->frame_size;
     _afio->frame->format         = _avctx->sample_fmt;
-    _afio->frame->channel_layout = _avctx->channel_layout;
-    _afio->frame->channels       = _avctx->channels;
+    av_channel_layout_copy(&_afio->frame->ch_layout, &_avctx->ch_layout);
     
-    int buffer_size = av_samples_get_buffer_size(NULL, _avctx->channels, _avctx->frame_size,
+    int buffer_size = av_samples_get_buffer_size(NULL, _avctx->ch_layout.nb_channels, _avctx->frame_size,
                                                  _avctx->sample_fmt, 0);
     _afio->samples = av_malloc(buffer_size);
     if (!_afio->samples) {
         NSLog(@"Could not allocate %d bytes for samples buffer", buffer_size);
         return NO;
     }
-    int ret = avcodec_fill_audio_frame(_afio->frame, _avctx->channels, _avctx->sample_fmt,
+    int ret = avcodec_fill_audio_frame(_afio->frame, _avctx->ch_layout.nb_channels, _avctx->sample_fmt,
                                        (const uint8_t*)_afio->samples, buffer_size, 0);
     if (ret < 0) {
         NSLog(@"Could not setup audio frame");
@@ -199,8 +197,7 @@ MP42_OBJC_DIRECT_MEMBERS
     }
     if (_avctx)
     {
-        avcodec_close(_avctx);
-        av_free(_avctx);
+        avcodec_free_context(&_avctx);
     }
 
     if (_ringBuffer) {
@@ -226,10 +223,10 @@ MP42_OBJC_DIRECT_MEMBERS
     uint64_t bsid = 8;
     uint64_t bsmod = 0;
     uint64_t acmod = 7;
-    uint64_t lfeon = (_avctx->channel_layout & AV_CH_LOW_FREQUENCY) ? 1 : 0;
+    uint64_t lfeon = (_avctx->ch_layout.u.mask & AV_CH_LOW_FREQUENCY) ? 1 : 0;
     uint64_t bit_rate_code = 15;
     
-    switch (_avctx->channels - lfeon)
+    switch (_avctx->ch_layout.nb_channels - lfeon)
     {
         case 1:
             acmod = 1;
@@ -238,11 +235,11 @@ MP42_OBJC_DIRECT_MEMBERS
             acmod = 2;
             break;
         case 3:
-            if (_avctx->channel_layout & AV_CH_BACK_CENTER) acmod = 3;
+            if (_avctx->ch_layout.u.mask & AV_CH_BACK_CENTER) acmod = 3;
             else acmod = 4;
             break;
         case 4:
-            if (_avctx->channel_layout & AV_CH_BACK_CENTER) acmod = 5;
+            if (_avctx->ch_layout.u.mask & AV_CH_BACK_CENTER) acmod = 5;
             else acmod = 6;
             break;
         case 5:
@@ -334,7 +331,7 @@ static MP42SampleBuffer *encode(AVCodecContext *context, AudioFileIO *afio)
     float *pIn   = afio->inBuffer;
     int channels = afio->channelsPerFrame;
     int samples  = context->frame_size;
-    int outputChannels = context->channels;
+    int outputChannels = context->ch_layout.nb_channels;
     for (int ch = 0; ch < channels; ++ch) {
         for (int i = 0; i < samples; ++i) {
             if (ch < outputChannels) {

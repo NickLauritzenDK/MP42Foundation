@@ -16,7 +16,7 @@
 
 #include "audio_resample.h"
 
-#include <avcodec.h>
+#include <libavcodec/avcodec.h>
 #include <libavutil/downmix_info.h>
 #include <libavutil/opt.h>
 
@@ -50,7 +50,7 @@ MP42_OBJC_DIRECT_MEMBERS
     MP42AudioUnitOutput outputType;
 }
 
-@property (nonatomic, readonly) AVCodec *codec;
+@property (nonatomic, readonly) const AVCodec *codec;
 @property (nonatomic, readonly) AVCodecContext *avctx;
 
 @property (nonatomic, readonly) NSThread *decoderThread;
@@ -98,7 +98,7 @@ MP42_OBJC_DIRECT_MEMBERS
             _avctx->extradata = (uint8_t *)av_malloc(magicCookie.length + AV_INPUT_BUFFER_PADDING_SIZE);
             if (!_avctx->extradata) {
                 NSLog(@"Could not av_malloc extradata");
-                av_freep(&_avctx);
+                avcodec_free_context(&_avctx);
                 return nil;
             }
             else if (magicCookie.length < UINT32_MAX) {
@@ -108,7 +108,7 @@ MP42_OBJC_DIRECT_MEMBERS
             else
             {
                 NSLog(@"Could not av_malloc extradata");
-                av_freep(&_avctx);
+                avcodec_free_context(&_avctx);
                 return nil;
             }
         }
@@ -151,14 +151,14 @@ MP42_OBJC_DIRECT_MEMBERS
 
         if (asbd.mFormatID == kAudioFormatLinearPCM)
         {
-            _avctx->channels = asbd.mChannelsPerFrame;
-            _avctx->channel_layout = convert_layout_to_av(_inputLayout, _inputLayoutSize);
+            av_channel_layout_from_mask(&_avctx->ch_layout, convert_layout_to_av(_inputLayout, _inputLayoutSize));
+            if (!_avctx->ch_layout.nb_channels) av_channel_layout_default(&_avctx->ch_layout, asbd.mChannelsPerFrame);
             _avctx->sample_rate = asbd.mSampleRate;
         }
 
         if (avcodec_open2(_avctx, _codec, &av_opts)) {
             NSLog(@"Error opening audio decoder");
-            av_freep(&_avctx);
+            avcodec_free_context(&_avctx);
             av_dict_free(&av_opts);
             return nil;
         }
@@ -235,9 +235,7 @@ MP42_OBJC_DIRECT_MEMBERS
 - (void)dealloc
 {
     if (_avctx) {
-        free(_avctx->extradata);
-        avcodec_close(_avctx);
-        av_freep(&_avctx);
+        avcodec_free_context(&_avctx);
     }
 
     if (_context) {
@@ -334,7 +332,7 @@ static void configurePCMDescriptors(MP42DecodeContext *context, AVFrame *frame)
             context->out_layout = AV_CH_LAYOUT_MONO;
         }
     }
-    else if (frame->channel_layout) {
+    else if (frame->ch_layout.u.mask) {
         context->out_layout = convert_layout_to_av(*context->inputLayout, *context->inputLayoutSize);;
     }
 
@@ -349,7 +347,7 @@ static void configurePCMDescriptors(MP42DecodeContext *context, AVFrame *frame)
 static void configureDescriptors(MP42DecodeContext *context, AVFrame *frame)
 {
     // Get real channels number and layout
-    int nb_channels = av_get_channel_layout_nb_channels(frame->channel_layout);
+    int nb_channels = frame->ch_layout.nb_channels;
     int sample_rate = frame->sample_rate;
     int container_sample_rate = context->inputFormat->mSampleRate;
 
@@ -380,8 +378,8 @@ static void configureDescriptors(MP42DecodeContext *context, AVFrame *frame)
             context->out_layout = AV_CH_LAYOUT_MONO;
         }
     }
-    else if (frame->channel_layout) {
-        context->out_layout = frame->channel_layout;
+    else if (frame->ch_layout.u.mask) {
+        context->out_layout = frame->ch_layout.u.mask;
     }
 
     // Create the AudioChannelLayout from the FFmpeg channel layout
@@ -437,7 +435,7 @@ static int resample(MP42DecodeContext *context, AVFrame *frame, uint8_t **output
     }
 
     hb_audio_resample_set_channel_layout(context->resampler,
-                                        frame->channel_layout);
+                                        frame->ch_layout.u.mask);
     hb_audio_resample_set_sample_rate(context->resampler,
                                     frame->sample_rate);
     hb_audio_resample_set_sample_fmt(context->resampler,

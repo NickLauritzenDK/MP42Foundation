@@ -1,0 +1,61 @@
+{
+  "tesseract": {
+    "version": "5.5.4",
+    "url": "https://github.com/tesseract-ocr/tesseract/archive/refs/tags/5.5.4.tar.gz",
+    "archive": "tesseract-5.5.4.tar.gz",
+    "directory": "tesseract-5.5.4",
+    "sha256": "a8dbf8b8c8ee427ff6ad1d99116502feaf59440af1adb893caf60a6576826cf4"
+  },
+  "leptonica": {
+    "version": "1.87.0",
+    "url": "https://github.com/DanBloomberg/leptonica/releases/download/1.87.0/leptonica-1.87.0.tar.gz",
+    "archive": "leptonica-1.87.0.tar.gz",
+    "directory": "leptonica-1.87.0",
+    "sha256": "c73363397f96eb1295602bf44d708a994ad42046c791bf03ea0505d829bdb6a7"
+  },
+  "png": {
+    "version": "1.6.59",
+    "url": "https://download.sourceforge.net/libpng/libpng-1.6.59.tar.xz",
+    "archive": "libpng-1.6.59.tar.xz",
+    "directory": "libpng-1.6.59",
+    "sha256": "d80dd2a38a37f803cb9b6ac7b14bd6e74ddc3b654780a8380bdf93523fdb4389"
+  },
+  "jpeg": {
+    "version": "3.2.1",
+    "url": "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.2.1/libjpeg-turbo-3.2.1.tar.gz",
+    "archive": "libjpeg-turbo-3.2.1.tar.gz",
+    "directory": "libjpeg-turbo-3.2.1",
+    "sha256": "c27ad72a68da151177929aa969ae773a2da5ac2af9ce946079314fdac8cece7f"
+  },
+  "tiff": {
+    "version": "4.7.2",
+    "url": "https://download.osgeo.org/libtiff/tiff-4.7.2.tar.xz",
+    "archive": "tiff-4.7.2.tar.xz",
+    "directory": "tiff-4.7.2",
+    "sha256": "4996f0c4f93094719b1ca5c6279b20e588773ba8a247533e486416fb662ddb88"
+  },
+  "ffmpeg": {
+    "version": "9.0.2",
+    "url": "https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz",
+    "archive": "ffmpeg-9.0.2.tar.xz",
+    "directory": "ffmpeg-9.0.2",
+    "sha256": "8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e"
+  },
+  "mp4v2": {
+    "version": "76799d1d227c1e63204a36ae0949b5e8e9792122",
+    "url": "https://github.com/SublerApp/mp4v2/archive/76799d1d227c1e63204a36ae0949b5e8e9792122.tar.gz",
+    "archive": "mp4v2-76799d1.tar.gz",
+    "directory": "mp4v2-76799d1d227c1e63204a36ae0949b5e8e9792122",
+    "sha256": "3812a3fc796b303ade1f3b1ab44a1041b6e8c774460307c06c3c59b6d75a7273",
+    "patches": [
+      "patches/mp4v2-director-api.patch"
+    ]
+  },
+  "nasm": {
+    "version": "3.02",
+    "url": "https://www.nasm.us/pub/nasm/releasebuilds/3.02/nasm-3.02.tar.xz",
+    "archive": "nasm-3.02.tar.xz",
+    "directory": "nasm-3.02",
+    "sha256": "87336eba53b4acfe917424ab5d500d2b0054d9f5148d35c2273ccf2cfb712f0d"
+  }
+}

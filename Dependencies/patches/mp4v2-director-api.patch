@@ -1,0 +1,47 @@
+diff --git a/include/mp4v2/itmf_tags.h b/include/mp4v2/itmf_tags.h
+index 3f11ce7..06ca241 100644
+--- a/include/mp4v2/itmf_tags.h
++++ b/include/mp4v2/itmf_tags.h
+@@ -300,6 +300,7 @@ MP4V2_EXPORT bool MP4TagsSetCompilation       ( const MP4Tags*, const uint8_t* )
+ 
+ MP4V2_EXPORT bool MP4TagsSetTrackSubTitle       ( const MP4Tags*, const char* );
+ MP4V2_EXPORT bool MP4TagsSetSongDescription   ( const MP4Tags*, const char* );
++MP4V2_EXPORT bool MP4TagsSetDirector          ( const MP4Tags*, const char* );
+ MP4V2_EXPORT bool MP4TagsSetArtDirector       ( const MP4Tags*, const char* );
+ MP4V2_EXPORT bool MP4TagsSetArranger          ( const MP4Tags*, const char* );
+ MP4V2_EXPORT bool MP4TagsSetLyricist          ( const MP4Tags*, const char* );
+diff --git a/src/cmeta.cpp b/src/cmeta.cpp
+index 5bf9068..ba53eef 100644
+--- a/src/cmeta.cpp
++++ b/src/cmeta.cpp
+@@ -626,6 +626,30 @@ MP4TagsSetSongDescription( const MP4Tags* m, const char* value )
+     return false;
+ }
+ 
++bool
++MP4TagsSetDirector( const MP4Tags* m, const char* value )
++{
++    if( !m || !m->__handle )
++        return false;
++
++    itmf::Tags& cpp = *static_cast<itmf::Tags*>(m->__handle);
++    MP4Tags& c = *const_cast<MP4Tags*>(m);
++
++    try {
++        cpp.c_setString( value, cpp.director, c.director );
++        return true;
++    }
++    catch( Exception* x ) {
++        mp4v2::impl::log.errorf(*x);
++        delete x;
++    }
++    catch( ... ) {
++        mp4v2::impl::log.errorf("%s: failed",__FUNCTION__);
++    }
++
++    return false;
++}
++
+ bool
+ MP4TagsSetArtDirector( const MP4Tags* m, const char* value )
+ {

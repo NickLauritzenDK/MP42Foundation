@@ -17,7 +17,7 @@
 #import "MP42Languages.h"
 #import "MP42MediaFormat.h"
 
-#include "avcodec.h"
+#include <libavcodec/avcodec.h>
 
 NSString * SRTStringFromTime( long long time, long timeScale , const char separator)
 {

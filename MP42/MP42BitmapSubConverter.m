@@ -35,7 +35,7 @@ MP42_OBJC_DIRECT_MEMBERS
 
     id<MP42TextRecognizer>   _ocr;
     CIContext               *_imgContext;
-    AVCodec                 *avCodec;
+    const AVCodec           *avCodec;
     AVCodecContext          *avContext;
     AVPacket                *pkt;
 
@@ -468,8 +468,7 @@ MP42_OBJC_DIRECT_MEMBERS
 - (void)dealloc
 {
     if (avContext) {
-        avcodec_close(avContext);
-        av_freep(&avContext);
+        avcodec_free_context(&avContext);
     }
     if (pkt) {
         av_packet_free(&pkt);

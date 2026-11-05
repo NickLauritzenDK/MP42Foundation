@@ -9,7 +9,7 @@
 
 #include "FFmpegUtils.h"
 
-#include <avcodec.h>
+#include <libavcodec/avcodec.h>
 #include <AudioToolbox/AudioToolbox.h>
 
 // List of codec IDs we know about and that map to audio fourccs
@@ -256,26 +256,22 @@ done:
     return layout_mask;
 }
 
-uint64_t channel_layout_for_channels(AVCodec *codec, int channels)
+uint64_t channel_layout_for_channels(const AVCodec *codec, int channels)
 {
-    const uint64_t *p;
-    uint64_t best_ch_layout = 0;
-    int best_nb_channells   = 0;
-    
-    if (!codec->channel_layouts)
-        return AV_CH_LAYOUT_STEREO;
-    
-    p = codec->channel_layouts;
-    while (*p) {
-        int nb_channels = av_get_channel_layout_nb_channels(*p);
-        
-        if (nb_channels == channels) return *p;
-        
-        if (nb_channels > best_nb_channells) {
-            best_ch_layout    = *p;
-            best_nb_channells = nb_channels;
+    const AVChannelLayout *layouts = NULL;
+    int count = 0;
+    uint64_t best = AV_CH_LAYOUT_STEREO;
+    int bestCount = 0;
+    if (avcodec_get_supported_config(NULL, codec, AV_CODEC_CONFIG_CHANNEL_LAYOUT,
+                                     0, (const void **)&layouts, &count) < 0 || !layouts)
+        return best;
+    for (int i = 0; i < count; i++) {
+        if (layouts[i].order != AV_CHANNEL_ORDER_NATIVE) continue;
+        if (layouts[i].nb_channels == channels) return layouts[i].u.mask;
+        if (layouts[i].nb_channels > bestCount) {
+            best = layouts[i].u.mask;
+            bestCount = layouts[i].nb_channels;
         }
-        p++;
     }
-    return best_ch_layout;
+    return best;
 }
