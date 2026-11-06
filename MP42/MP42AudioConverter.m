@@ -7,6 +7,7 @@
 //
 
 #import "MP42AudioConverter.h"
+#import "MP42MkvImporter.h"
 #import "MP42AudioTrack.h"
 #import "MP42MediaFormat.h"
 
@@ -39,7 +40,10 @@ MP42_OBJC_DIRECT_MEMBERS
     if (self) {
         NSData *magicCookie = [track.importer magicCookieForTrack:track];
         AudioStreamBasicDescription asbd = [self basicDescriptorForTrack:track];
-        UInt32 initialPadding = [self initialPaddingForTrack:track];
+        // Matroska timestamps/CodecDelay describe the presentation offset. Keep
+        // decoded source frames and express the offset once in its output edits.
+        UInt32 initialPadding = ([track.importer isKindOfClass:MP42MkvImporter.class] &&
+                                 settings.format == kAudioFormatMPEG4AAC) ? 0 : [self initialPaddingForTrack:track];
         UInt32 channelLayoutSize = sizeof(AudioChannelLayout);
         AudioChannelLayout *channelLayout = calloc(channelLayoutSize, 1);
         channelLayout->mChannelLayoutTag = track.channelLayoutTag;
@@ -145,6 +149,10 @@ MP42_OBJC_DIRECT_MEMBERS
 
 - (uint32_t)encoderDelay {
     return [_encoder isKindOfClass:MP42AudioEncoder.class] ? ((MP42AudioEncoder *)_encoder).primeInfo.leadingFrames : 0;
+}
+
+- (uint64_t)encodedInputFrames {
+    return [_encoder isKindOfClass:MP42AudioEncoder.class] ? ((MP42AudioEncoder *)_encoder).inputFrameCount : 0;
 }
 
 - (double)sampleRate {

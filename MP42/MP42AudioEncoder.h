@@ -29,6 +29,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly) AudioStreamBasicDescription outputFormat;
 
 @property (nonatomic, readonly) AudioCodecPrimeInfo primeInfo;
+@property (nonatomic, readonly) uint64_t inputFrameCount;
 
 @property (nonatomic, readonly, nullable) NSData *magicCookie;
 

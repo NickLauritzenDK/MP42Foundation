@@ -20,6 +20,7 @@
 #import "MP42PrivateUtilities.h"
 #import "MP42FormatUtilites.h"
 #import "MP42Track+Private.h"
+#import "MP42AudioConverter.h"
 
 #define SCALE_FACTOR 1000000.f
 #define BUFFER_SIZE 20
@@ -33,8 +34,9 @@ MP42_OBJC_DIRECT_MEMBERS
     NSMutableArray<MP42SampleBuffer *> *queue;
 
     uint32_t    timescale;
-    uint64_t    currentTime;
-    uint64_t    startTime;
+    int64_t     currentTime;
+    int64_t     startTime;
+    int64_t     finalDiscardPadding;
     int64_t     minDisplayOffset;
     uint32_t    buffer, samplesWritten, bufferFlush;
 
@@ -711,7 +713,7 @@ static NSString * TrackNameToString(TrackInfo *track)
         codecDelay = 2112 * SCALE_FACTOR * 1000 / sampleRate;
     }*/
 
-    return (((double)StartTime) - codecDelay) / SCALE_FACTOR;
+    return (((double)(int64_t)StartTime) - codecDelay) / SCALE_FACTOR;
 }
 
 static uint32_t timescale(TrackInfo *trackInfo)
@@ -1007,16 +1009,17 @@ static uint32_t timescale(TrackInfo *trackInfo)
                 break;
             }
 
-            self.progress = (StartTime / _fileDuration / 10000);
+            self.progress = (MAX((int64_t)0, (int64_t)StartTime) / _fileDuration / 10000);
 
             MatroskaDemuxHelper *demuxHelper = helpers[Track];
             TrackInfo *trackInfo = demuxHelper->trackInfo;
 
-            if (StartTime < demuxHelper->startTime) {
-                demuxHelper->startTime = StartTime;
+            if ((int64_t)StartTime < demuxHelper->startTime) {
+                demuxHelper->startTime = (int64_t)StartTime;
             }
 
             if (trackInfo->Type == TT_AUDIO) {
+                demuxHelper->finalDiscardPadding = FrameDiscard;
 
                 if (copyMkvPacket(trackInfo, &Frame, &FrameSize)) {
 
@@ -1032,7 +1035,7 @@ static uint32_t timescale(TrackInfo *trackInfo)
 #define VARIABLE_AUDIO_RATE 1
 
 #ifdef VARIABLE_AUDIO_RATE
-                    double scaledStartTime = sample->decodeTimestamp * (double)mkv_TruncFloat(trackInfo->AV.Audio.SamplingFreq) / 1000000000.f;
+                    double scaledStartTime = (int64_t)sample->decodeTimestamp * (double)mkv_TruncFloat(trackInfo->AV.Audio.SamplingFreq) / 1000000000.f;
 
                     if (demuxHelper->previousSample) {
                         uint64_t sampleDuration = scaledStartTime - demuxHelper->currentTime;
@@ -1298,6 +1301,43 @@ static uint32_t timescale(TrackInfo *trackInfo)
 {
     MatroskaDemuxHelper *demuxHelper = [self helperWithTrackID:track.sourceId];
     MP4TrackId trackId = track.trackId;
+
+    if ([track isKindOfClass:MP42AudioTrack.class] &&
+        track.conversionSettings.format == kAudioFormatMPEG4AAC &&
+        [track.converter isKindOfClass:MP42AudioConverter.class]) {
+        uint32_t scale = MP4GetTrackTimeScale(fileHandle, trackId);
+        MP4Duration total = ((MP42AudioConverter *)track.converter).encodedInputFrames;
+        NSTimeInterval presentationOffset = track.startOffset;
+        // FFmpeg's Opus decoder already consumes OpusHead pre-skip. Its
+        // decoded media starts that many frames after the first packet.
+        TrackInfo *info = demuxHelper->trackInfo;
+        if (track.format == kAudioFormatOpus && info->CodecPrivateSize >= 12) {
+            const uint8_t *header = (const uint8_t *)info->CodecPrivate;
+            if (!memcmp(header, "OpusHead", 8)) {
+                uint16_t preSkip = header[10] | ((uint16_t)header[11] << 8);
+                presentationOffset += preSkip / 48.0;
+            }
+        }
+        MP4Timestamp delay = ((MP42AudioConverter *)track.converter).encoderDelay;
+        MP4Timestamp trim = (MP4Timestamp)llround(MAX(0, -presentationOffset) * scale / 1000.0);
+        MP4Timestamp padding = 0;
+        if (demuxHelper->finalDiscardPadding > 0) {
+            padding += (MP4Timestamp)llround((long double)demuxHelper->finalDiscardPadding * scale / 1000000000.0L);
+        }
+        MP4Duration available = total > trim + padding ? total - trim - padding : 0;
+        if (presentationOffset > 0) {
+            MP4Duration gap = (MP4Duration)llround(presentationOffset * MP4GetTimeScale(fileHandle) / 1000.0);
+            MP4AddTrackEdit(fileHandle, trackId, MP4_INVALID_EDIT_ID, MP4_INVALID_TIMESTAMP, gap, 0);
+        }
+        MP4Duration duration = MP4ConvertFromTrackDuration(fileHandle, trackId, available, MP4GetTimeScale(fileHandle));
+        MP4AddTrackEdit(fileHandle, trackId, MP4_INVALID_EDIT_ID, delay + trim, duration, 0);
+        MP4SetTrackIntegerProperty(fileHandle, trackId, "tkhd.duration", duration +
+            (MP4Duration)llround(MAX(0, presentationOffset) * MP4GetTimeScale(fileHandle) / 1000.0));
+        // Already applied together with encoder priming. A later generic offset
+        // rewrite would discard the priming media start.
+        [track.updatedProperty removeObjectForKey:@"start_offset"];
+        return;
+    }
 
     if (demuxHelper->minDisplayOffset != 0) {
 

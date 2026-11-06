@@ -26,6 +26,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly, nullable) NSData *magicCookie;
 @property (nonatomic, readonly) double sampleRate;
 @property (nonatomic, readonly) uint32_t encoderDelay;
+@property (nonatomic, readonly) uint64_t encodedInputFrames;
 
 NS_ASSUME_NONNULL_END
 

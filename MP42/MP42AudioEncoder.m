@@ -31,6 +31,7 @@ typedef struct AudioFileIO
     UInt32  numPacketsPerRead;
 
     UInt64 outputPos;
+    UInt64 inputFrameCount;
 
     bool done;
 
@@ -317,6 +318,11 @@ MP42_OBJC_DIRECT_MEMBERS
     }
 }
 
+- (uint64_t)inputFrameCount
+{
+    return _afio ? _afio->inputFrameCount : 0;
+}
+
 - (nullable NSData *)magicCookie
 {
     return _magicCookie;
@@ -380,6 +386,7 @@ OSStatus EncoderDataProc(AudioConverterRef               inAudioConverter,
     ioData->mBuffers[0].mNumberChannels = afio->channelsPerFrame;
 
     *ioNumberDataPackets = ioData->mBuffers[0].mDataByteSize / afio->inSizePerPacket;
+    afio->inputFrameCount += *ioNumberDataPackets;
 
     if (outDataPacketDescription) {
         if (afio->pktDescs) {
